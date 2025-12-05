@@ -22,30 +22,54 @@ app.use(cors({
     credentials: true
 }))
 
-const io = new Server(app, {
+app.use(express.json())
+app.use(cookieParser());
+
+const io = new Server(server, {
     cors: {
         origin: "http://localhost:5173",
         credentials: true,
     }
 })
 
+const users = new Map()
+let onlineUsers = {}
+
 io.on("connection", (socket) => {
     console.log("User connected", socket.id)
+    socket.on("register", (userId) => {
+        users.set(userId, socket.id)
+        console.log(users);
+        onlineUsers[userId] = true;
+        console.log("Online users:", onlineUsers);
+        io.emit("update_status", { userId: userId, status: "online" })
+    })
+    socket.on("send_message", (data) => {
+        if (!data?.receiverId) return;
+        const receiverSocketId = users.get(data.receiverId)
 
-    socket.on("send_message", (data)=>{
-        console.log("Message", data)
-        io.emit("receive_message",data)
+        if (receiverSocketId) {
+            io.to(receiverSocketId).emit("receive_message", data);
+        }
     })
 
-    socket.on("disconnect",()=>{
-        console.log("user disconnected", socket.id)
-    })
-})
+    socket.on("disconnect", () => {
+        // Find which user disconnected
+        for (let [userId, socketId] of users.entries()) {
+            if (socketId === socket.id) {
+                onlineUsers[userId] = false;
 
+                io.emit("update_status", {
+                    userId: userId,
+                    status: "offline",
+                });
 
+                break;
+            }
+        }
+    });
+});
 
-app.use(express.json())
-app.use(cookieParser());
 
 app.use("/api/user", userRoute)
 
